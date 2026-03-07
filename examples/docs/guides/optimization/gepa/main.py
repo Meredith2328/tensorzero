@@ -1,5 +1,4 @@
 import asyncio
-import time
 
 from ner import Row, load_dataset
 from tensorzero import AsyncTensorZeroGateway
@@ -80,7 +79,7 @@ async def main():
                     f"  Iteration {progress['current_iteration']}/{progress['max_iterations']}"
                     f" — {progress['current_step']}"
                 )
-            time.sleep(10)
+            await asyncio.sleep(10)
 
     # Print optimized variants and their evaluation statistics
     for variant_name, stats in response["statistics"].items():

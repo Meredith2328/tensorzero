@@ -284,6 +284,8 @@ while True:
                 f"Iteration {progress['current_iteration']}/{progress['max_iterations']}"
                 f" — {progress['current_step']}"
             )
+        else:
+            print("Pending...")
         await asyncio.sleep(10)
 ```
 

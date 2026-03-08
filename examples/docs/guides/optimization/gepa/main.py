@@ -22,7 +22,7 @@ MAX_CONCURRENCY = 50  # lower this value if you get rate limited
 
 
 async def main():
-    t0 = await AsyncTensorZeroGateway.build_http(
+    t0 = await AsyncTensorZeroGateway.build_http(  # type: ignore[misc]
         gateway_url="http://localhost:3000",
     )
 
@@ -63,6 +63,7 @@ async def main():
     print(f"GEPA task launched: {task_id}")
 
     # Poll for results
+    last_status = None
     while True:
         response = await t0.optimization.gepa.get(task_id=task_id)
 
@@ -75,10 +76,15 @@ async def main():
         else:
             progress = response.get("progress")
             if progress:
-                print(
+                status = (
                     f"  Iteration {progress['current_iteration']}/{progress['max_iterations']}"
                     f" — {progress['current_step']}"
                 )
+            else:
+                status = "  Pending..."
+            if status != last_status:
+                print(status)
+                last_status = status
             await asyncio.sleep(10)
 
     # Print optimized variants and their evaluation statistics

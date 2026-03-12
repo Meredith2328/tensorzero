@@ -731,6 +731,7 @@ async fn create_postgres_connection(
             }
         };
         let channel_capacity = observability.write_queue_capacity;
+        let flush_concurrency = config.flush_concurrency;
         let batch_sender = Arc::new(PostgresBatchSender::new(
             pool.clone(),
             config,
@@ -738,7 +739,7 @@ async fn create_postgres_connection(
         )?);
         tracing::info!(
             channel_capacity,
-            flush_concurrency = config.flush_concurrency,
+            flush_concurrency,
             "Postgres batch writer enabled (bounded channels, concurrent flush)"
         );
         PostgresConnectionInfo::new_with_pool_and_batcher(pool, batch_sender)

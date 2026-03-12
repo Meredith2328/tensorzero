@@ -715,10 +715,6 @@ impl ModelInferenceQueries for DelegatingDatabaseConnection {
 
         self.get_database().insert_model_inferences(rows).await
     }
-
-    async fn flush_model_provider_statistics(&self) {
-        self.get_database().flush_model_provider_statistics().await;
-    }
 }
 #[async_trait]
 impl WorkflowEvaluationQueries for DelegatingDatabaseConnection {
@@ -1116,6 +1112,18 @@ mod test_helpers_impl {
                 }
                 PrimaryDatastore::ClickHouse => {
                     self.clickhouse.sleep_for_writes_to_be_visible().await;
+                }
+                PrimaryDatastore::Disabled => {}
+            }
+        }
+
+        async fn prepare_model_provider_statistics(&self) {
+            match self.primary {
+                PrimaryDatastore::Postgres => {
+                    self.postgres.prepare_model_provider_statistics().await;
+                }
+                PrimaryDatastore::ClickHouse => {
+                    self.clickhouse.prepare_model_provider_statistics().await;
                 }
                 PrimaryDatastore::Disabled => {}
             }

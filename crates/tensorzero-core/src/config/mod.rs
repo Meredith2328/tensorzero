@@ -1582,6 +1582,12 @@ impl Config {
             }
             .into());
         }
+        if self.gateway.observability.batch_writes.flush_concurrency == 0 {
+            return Err(ErrorDetails::Config {
+                message: "Batch writes flush concurrency must be greater than 0".to_string(),
+            }
+            .into());
+        }
         if self.gateway.observability.batch_writes.flush_interval_ms == 0 {
             return Err(ErrorDetails::Config {
                 message: "Batch writes flush interval must be greater than 0".to_string(),

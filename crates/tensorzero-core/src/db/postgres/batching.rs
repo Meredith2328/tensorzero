@@ -1,6 +1,5 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{FutureExt, TryFutureExt};
@@ -41,15 +40,10 @@ type FlushJob = Pin<Box<dyn Future<Output = ()> + Send>>;
 /// processing all outstanding batches once all senders are dropped.
 #[derive(Debug)]
 pub struct PostgresBatchSender {
-    channels: Option<PostgresBatchChannels>,
-    pub writer_handle: BatchWriterHandle,
-}
-
-#[derive(Debug)]
-struct PostgresBatchChannels {
     chat_inferences: Sender<ChatInferenceDatabaseInsert>,
     json_inferences: Sender<JsonInferenceDatabaseInsert>,
     model_inferences: Sender<StoredModelInference>,
+    pub writer_handle: BatchWriterHandle,
 }
 
 impl PostgresBatchSender {
@@ -91,64 +85,44 @@ impl PostgresBatchSender {
         });
 
         Ok(Self {
-            channels: Some(PostgresBatchChannels {
-                chat_inferences: chat_tx,
-                json_inferences: json_tx,
-                model_inferences: model_tx,
-            }),
+            chat_inferences: chat_tx,
+            json_inferences: json_tx,
+            model_inferences: model_tx,
             writer_handle: writer_handle.map_err(|e| format!("{e:?}")).boxed().shared(),
         })
     }
 
-    pub fn send_chat_inferences(&self, rows: &[ChatInferenceDatabaseInsert]) -> Result<(), Error> {
-        let Some(channels) = &self.channels else {
-            return Err(Error::new(ErrorDetails::InternalError {
-                message: "Postgres batch sender dropped".to_string(),
-            }));
-        };
+    pub fn send_chat_inferences(&self, rows: &[ChatInferenceDatabaseInsert]) {
         for row in rows {
-            if let Err(e) = channels.chat_inferences.try_send(row.clone()) {
+            if let Err(e) = self.chat_inferences.try_send(row.clone()) {
                 tracing::error!(
                     "Postgres batch channel full — dropping chat inference record. \
                      Increase `write_queue_capacity` or check Postgres performance. Error: {e}"
                 );
             }
         }
-        Ok(())
     }
 
-    pub fn send_json_inferences(&self, rows: &[JsonInferenceDatabaseInsert]) -> Result<(), Error> {
-        let Some(channels) = &self.channels else {
-            return Err(Error::new(ErrorDetails::InternalError {
-                message: "Postgres batch sender dropped".to_string(),
-            }));
-        };
+    pub fn send_json_inferences(&self, rows: &[JsonInferenceDatabaseInsert]) {
         for row in rows {
-            if let Err(e) = channels.json_inferences.try_send(row.clone()) {
+            if let Err(e) = self.json_inferences.try_send(row.clone()) {
                 tracing::error!(
                     "Postgres batch channel full — dropping json inference record. \
                      Increase `write_queue_capacity` or check Postgres performance. Error: {e}"
                 );
             }
         }
-        Ok(())
     }
 
-    pub fn send_model_inferences(&self, rows: &[StoredModelInference]) -> Result<(), Error> {
-        let Some(channels) = &self.channels else {
-            return Err(Error::new(ErrorDetails::InternalError {
-                message: "Postgres batch sender dropped".to_string(),
-            }));
-        };
+    pub fn send_model_inferences(&self, rows: &[StoredModelInference]) {
         for row in rows {
-            if let Err(e) = channels.model_inferences.try_send(row.clone()) {
+            if let Err(e) = self.model_inferences.try_send(row.clone()) {
                 tracing::error!(
                     "Postgres batch channel full — dropping model inference record. \
                      Increase `write_queue_capacity` or check Postgres performance. Error: {e}"
                 );
             }
         }
-        Ok(())
     }
 }
 
@@ -161,22 +135,22 @@ struct PostgresBatchWriter {
 /// A concurrent pool of flush workers that execute bulk INSERT jobs.
 ///
 /// Jobs are submitted via a bounded channel. Workers pick up jobs and execute them
-/// against the PgPool. When the channel closes, workers drain remaining jobs and exit.
+/// against the PgPool. When the sender is dropped, workers drain remaining jobs and exit.
+/// Call `drain()` after dropping all senders to await worker completion.
 struct FlushPool {
-    sender: Sender<FlushJob>,
+    flush_sender: Sender<FlushJob>,
+    worker_handles: JoinSet<()>,
 }
 
 impl FlushPool {
     fn new(num_workers: usize, flush_queue_capacity: usize) -> Self {
         let (tx, rx) = mpsc::channel::<FlushJob>(flush_queue_capacity);
-        let rx = Arc::new(tokio::sync::Mutex::new(rx));
+        let rx = std::sync::Arc::new(tokio::sync::Mutex::new(rx));
 
+        let mut worker_handles = JoinSet::new();
         for worker_id in 0..num_workers {
             let rx = rx.clone();
-            // Workers drain remaining jobs when the sender is dropped during shutdown,
-            // then exit once `recv()` returns `None`.
-            #[expect(clippy::disallowed_methods)]
-            tokio::spawn(async move {
+            worker_handles.spawn(async move {
                 loop {
                     let job = {
                         let mut rx = rx.lock().await;
@@ -193,14 +167,20 @@ impl FlushPool {
             });
         }
 
-        Self { sender: tx }
+        Self {
+            flush_sender: tx,
+            worker_handles,
+        }
     }
 
-    /// Submit a flush job. If the flush queue is full, blocks until space is available.
-    /// This provides backpressure from the flush pool back to the accumulator.
-    async fn submit(&self, job: FlushJob) {
-        if let Err(e) = self.sender.send(job).await {
-            tracing::error!("Flush pool closed unexpectedly: {e}");
+    /// Close the flush queue and await all workers to drain remaining jobs.
+    async fn drain(mut self) {
+        // Drop the sender so workers see channel closure after draining remaining jobs.
+        drop(self.flush_sender);
+        while let Some(result) = self.worker_handles.join_next().await {
+            if let Err(e) = result {
+                tracing::error!("Flush pool worker panicked: {e}");
+            }
         }
     }
 }
@@ -215,14 +195,14 @@ impl PostgresBatchWriter {
         // Backpressure from a full flush queue propagates to the accumulator,
         // which stops draining the input channel, which fills up and triggers drops.
         let flush_queue_capacity = flush_concurrency * 2;
-        let flush_pool = Arc::new(FlushPool::new(flush_concurrency, flush_queue_capacity));
+        let flush_pool = FlushPool::new(flush_concurrency, flush_queue_capacity);
 
         let mut accumulator_set = JoinSet::new();
 
         // Chat inferences accumulator
         {
             let pool = pool.clone();
-            let flush_pool = flush_pool.clone();
+            let flush_sender = flush_pool.flush_sender.clone();
             let channel = self.chat_inferences_rx;
             accumulator_set.spawn(async move {
                 process_bounded_channel_with_capacity_and_timeout(
@@ -231,12 +211,13 @@ impl PostgresBatchWriter {
                     batch_timeout,
                     move |buffer| {
                         let pool = pool.clone();
-                        let flush_pool = flush_pool.clone();
+                        let flush_sender = flush_sender.clone();
                         async move {
-                            let job: FlushJob =
-                                Box::pin(flush_chat_inferences(pool, buffer.clone()));
-                            flush_pool.submit(job).await;
-                            buffer
+                            let job: FlushJob = Box::pin(flush_chat_inferences(pool, buffer));
+                            if let Err(e) = flush_sender.send(job).await {
+                                tracing::error!("Flush pool closed unexpectedly: {e}");
+                            }
+                            Vec::with_capacity(max_rows)
                         }
                     },
                 )
@@ -247,7 +228,7 @@ impl PostgresBatchWriter {
         // JSON inferences accumulator
         {
             let pool = pool.clone();
-            let flush_pool = flush_pool.clone();
+            let flush_sender = flush_pool.flush_sender.clone();
             let channel = self.json_inferences_rx;
             accumulator_set.spawn(async move {
                 process_bounded_channel_with_capacity_and_timeout(
@@ -256,12 +237,13 @@ impl PostgresBatchWriter {
                     batch_timeout,
                     move |buffer| {
                         let pool = pool.clone();
-                        let flush_pool = flush_pool.clone();
+                        let flush_sender = flush_sender.clone();
                         async move {
-                            let job: FlushJob =
-                                Box::pin(flush_json_inferences(pool, buffer.clone()));
-                            flush_pool.submit(job).await;
-                            buffer
+                            let job: FlushJob = Box::pin(flush_json_inferences(pool, buffer));
+                            if let Err(e) = flush_sender.send(job).await {
+                                tracing::error!("Flush pool closed unexpectedly: {e}");
+                            }
+                            Vec::with_capacity(max_rows)
                         }
                     },
                 )
@@ -271,7 +253,7 @@ impl PostgresBatchWriter {
 
         // Model inferences accumulator
         {
-            let flush_pool = flush_pool.clone();
+            let flush_sender = flush_pool.flush_sender.clone();
             let channel = self.model_inferences_rx;
             accumulator_set.spawn(async move {
                 process_bounded_channel_with_capacity_and_timeout(
@@ -280,12 +262,13 @@ impl PostgresBatchWriter {
                     batch_timeout,
                     move |buffer| {
                         let pool = pool.clone();
-                        let flush_pool = flush_pool.clone();
+                        let flush_sender = flush_sender.clone();
                         async move {
-                            let job: FlushJob =
-                                Box::pin(flush_model_inferences(pool, buffer.clone()));
-                            flush_pool.submit(job).await;
-                            buffer
+                            let job: FlushJob = Box::pin(flush_model_inferences(pool, buffer));
+                            if let Err(e) = flush_sender.send(job).await {
+                                tracing::error!("Flush pool closed unexpectedly: {e}");
+                            }
+                            Vec::with_capacity(max_rows)
                         }
                     },
                 )
@@ -300,16 +283,10 @@ impl PostgresBatchWriter {
             }
         }
 
-        // Drop the flush pool sender to close the flush queue.
-        // Workers will drain remaining jobs and exit.
-        // We need to drop the Arc to close the channel — the workers hold receivers.
-        drop(flush_pool);
-
-        // The flush workers are spawned tokio tasks that will complete on their own.
-        // The spawn_blocking handle (writer_handle) will finish once this async block returns.
-        // We give workers a moment to drain — they should finish quickly since
-        // the accumulators already submitted all final batches.
-        tokio::task::yield_now().await;
+        // All accumulators done — drain the flush pool, awaiting all in-flight INSERTs.
+        // This is critical for shutdown: without this, spawned flush workers could be
+        // abandoned before completing their final INSERTs, causing data loss.
+        flush_pool.drain().await;
     }
 }
 

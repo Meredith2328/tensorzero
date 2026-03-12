@@ -79,21 +79,8 @@ Please return the entities in the following JSON format:
 
 <Step title="Collect your optimization data">
 
-After deploying the [TensorZero Gateway](/deployment/tensorzero-gateway) with [ClickHouse](/deployment/clickhouse), make [inference calls](/gateway/call-any-llm) to the `extract_entities` function you configured.
-TensorZero automatically collects structured data about those inferences.
-
-You can populate a named [dataset](/gateway/api-reference/datasets-datapoints) from your historical inferences using `create_datapoints_from_inferences`:
-
-```python
-await t0.create_datapoints_from_inferences(
-    dataset_name="extract_entities_dataset",
-    params={
-        "type": "inference_query",
-        "function_name": "extract_entities",
-        "output_source": "inference",
-    },
-)
-```
+After deploying the [TensorZero Gateway](/deployment/tensorzero-gateway) with [ClickHouse](/deployment/clickhouse), [build a dataset](/gateway/api-reference/datasets-datapoints) for the `extract_entities` function you configured.
+You can create datapoints from historical inferences or external/synthetic datasets.
 
 When you launch GEPA with a single `dataset_name`, the dataset is automatically split 50/50 into training and validation sets.
 You can also provide separate `train_dataset_name` and `val_dataset_name` for explicit control over the split.

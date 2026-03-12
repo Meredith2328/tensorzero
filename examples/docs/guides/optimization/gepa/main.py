@@ -1,7 +1,12 @@
 import asyncio
+import json
 
 from ner import Row, load_dataset
-from tensorzero import AsyncTensorZeroGateway
+from tensorzero import (
+    AsyncTensorZeroGateway,
+    CreateDatapointRequestJson,
+    JsonDatapointOutputUpdate,
+)
 
 FUNCTION_NAME = "extract_entities"
 EVALUATION_NAME = "extract_entities_eval"
@@ -21,6 +26,22 @@ NUM_SAMPLES = 500
 MAX_CONCURRENCY = 50  # lower this value if you get rate limited
 
 
+def make_datapoint(row: Row) -> CreateDatapointRequestJson:
+    """Create a CreateDatapointRequestJson from a dataset row."""
+    return CreateDatapointRequestJson(
+        function_name=FUNCTION_NAME,
+        input={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": row.input,
+                }
+            ]
+        },
+        output=JsonDatapointOutputUpdate(raw=json.dumps(row.label)),
+    )
+
+
 async def main():
     t0 = await AsyncTensorZeroGateway.build_http(  # type: ignore[misc]
         gateway_url="http://localhost:3000",
@@ -38,15 +59,14 @@ async def main():
 
     print(f"Creating {len(rows)} datapoints in dataset `{DATASET_NAME}`...")
 
-    # Create a dataset from the inferences we just ran
-    await t0.create_datapoints_from_inferences(
+    # Create datapoints in a TensorZero dataset
+    datapoints = [make_datapoint(row) for row in rows]
+    await t0.create_datapoints(
         dataset_name=DATASET_NAME,
-        params={
-            "type": "inference_query",
-            "function_name": FUNCTION_NAME,
-            "output_source": "inference",
-        },
+        requests=datapoints,
     )
+
+    print(f"Created {len(datapoints)} datapoints")
 
     # Launch GEPA optimization
     result = await t0.optimization.gepa.launch(

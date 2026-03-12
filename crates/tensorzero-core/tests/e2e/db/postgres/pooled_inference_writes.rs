@@ -146,12 +146,7 @@ async fn poll_until_count(
 }
 
 /// Polls `count_model_inferences_by_inference_id` until the count equals `expected`.
-async fn poll_until_model_count(
-    pool: &sqlx::PgPool,
-    inference_id: Uuid,
-    expected: i64,
-    msg: &str,
-) {
+async fn poll_until_model_count(pool: &sqlx::PgPool, inference_id: Uuid, expected: i64, msg: &str) {
     let pool = pool.clone();
     poll_for_result(
         move || {

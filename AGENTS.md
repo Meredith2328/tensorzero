@@ -51,9 +51,11 @@
 - Prefer "Postgres" instead of "PostgreSQL" in comments, error messages, docs, etc.
 - **Do not run `COUNT(*)` or other aggregations over full inference tables** (`chat_inferences`, `json_inferences`). These tables can be very large and full scans are expensive. Use pre-aggregated rollup tables (e.g. `inference_by_function_statistics`) or filtered partial indexes instead.
 
-# Python Dependencies
+# Python
 
 We use `uv` to manage Python dependencies.
+
+- After writing or modifying Python files, run `uvx ruff@0.14.0 check --extend-select I .` and `uvx ruff@0.14.0 format .` to lint and format. CI enforces this.
 
 # Type generation for TypeScript
 
@@ -71,3 +73,4 @@ We use `ts-rs` and `n-api` for TypeScript-Rust interoperability.
 
 - `CONTRIBUTING.md` has additional context on working on this codebase.
 - Prefer backticks (`) instead of ticks (') to wrap technical terms in comments, error messages, READMEs, etc.
+- **Scout rule**: Always leave the codebase better than you found it. If you encounter broken CI, lint issues, or small problems adjacent to your work, fix them — don't dismiss them as "not my problem".

@@ -73,6 +73,7 @@ def log_error(msg: str) -> None:
 # Docker Compose
 # ---------------------------------------------------------------------------
 
+
 def postgres_is_reachable() -> bool:
     """Check if Postgres is already accepting connections on the expected port."""
     import socket
@@ -97,10 +98,15 @@ def start_docker(skip: bool) -> bool:
     log("Starting Postgres via docker compose...")
     subprocess.run(
         [
-            "docker", "compose",
-            "-f", str(DOCKER_COMPOSE_FILE),
-            "up", "-d",
-            "--build", "--force-recreate", "--remove-orphans",
+            "docker",
+            "compose",
+            "-f",
+            str(DOCKER_COMPOSE_FILE),
+            "up",
+            "-d",
+            "--build",
+            "--force-recreate",
+            "--remove-orphans",
         ],
         check=True,
     )
@@ -112,9 +118,13 @@ def start_docker(skip: bool) -> bool:
             # Also check pg_isready via docker
             result = subprocess.run(
                 [
-                    "docker", "compose",
-                    "-f", str(DOCKER_COMPOSE_FILE),
-                    "ps", "--format", "json",
+                    "docker",
+                    "compose",
+                    "-f",
+                    str(DOCKER_COMPOSE_FILE),
+                    "ps",
+                    "--format",
+                    "json",
                 ],
                 capture_output=True,
                 text=True,
@@ -148,6 +158,7 @@ def stop_docker(we_started_it: bool) -> None:
 # Compilation
 # ---------------------------------------------------------------------------
 
+
 def compile_binaries(skip: bool) -> None:
     if skip:
         log("Skipping compilation (--skip-compile)")
@@ -180,6 +191,7 @@ def find_binary(name: str) -> Path:
 # Migrations
 # ---------------------------------------------------------------------------
 
+
 def run_migrations(gateway_bin: Path) -> None:
     log("Running Postgres migrations...")
     result = subprocess.run(
@@ -197,6 +209,7 @@ def run_migrations(gateway_bin: Path) -> None:
 # ---------------------------------------------------------------------------
 # Gateway management
 # ---------------------------------------------------------------------------
+
 
 def wait_for_gateway(url: str, timeout: int = 30) -> bool:
     health_url = f"{url}/health"
@@ -246,6 +259,7 @@ def stop_process(proc: subprocess.Popen, name: str = "process") -> None:
 # Load test execution
 # ---------------------------------------------------------------------------
 
+
 def run_load_test(
     variant: Variant,
     load_test_bin: Path,
@@ -255,16 +269,26 @@ def run_load_test(
 ) -> dict | None:
     cmd = [
         str(load_test_bin),
-        "--gateway-url", gateway_url,
-        "--function-name", "load_test_chat",
-        "-r", str(args.rate),
-        "-c", str(args.concurrency),
-        "-d", args.duration,
-        "--max-tokens", "128",
-        "--drain-wait-ms", str(variant.drain_wait_ms),
-        "--max-error-rate", str(args.max_error_rate),
-        "--benchmark-report-json", str(report_path),
-        "--verify-timeout-s", str(args.verify_timeout_s),
+        "--gateway-url",
+        gateway_url,
+        "--function-name",
+        "load_test_chat",
+        "-r",
+        str(args.rate),
+        "-c",
+        str(args.concurrency),
+        "-d",
+        args.duration,
+        "--max-tokens",
+        "128",
+        "--drain-wait-ms",
+        str(variant.drain_wait_ms),
+        "--max-error-rate",
+        str(args.max_error_rate),
+        "--benchmark-report-json",
+        str(report_path),
+        "--verify-timeout-s",
+        str(args.verify_timeout_s),
     ]
     if args.prompt_chars:
         cmd.extend(["--prompt-chars", str(args.prompt_chars)])
@@ -321,6 +345,7 @@ def run_variant(
 # Results
 # ---------------------------------------------------------------------------
 
+
 def print_comparison_table(results: dict[str, dict]) -> None:
     if not results:
         log_error("No results to compare.")
@@ -330,8 +355,7 @@ def print_comparison_table(results: dict[str, dict]) -> None:
     print()
 
     header = (
-        f"{'Variant':<20} {'QPS':>8} {'p99 (ms)':>10} {'Err %':>8} "
-        f"{'Chat Rows':>10} {'Model Rows':>11} {'Pass':>6}"
+        f"{'Variant':<20} {'QPS':>8} {'p99 (ms)':>10} {'Err %':>8} {'Chat Rows':>10} {'Model Rows':>11} {'Pass':>6}"
     )
     print(header)
     print("-" * len(header))
@@ -360,69 +384,92 @@ def print_comparison_table(results: dict[str, dict]) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Run Postgres inference load tests across write-mode variants."
-    )
+    parser = argparse.ArgumentParser(description="Run Postgres inference load tests across write-mode variants.")
     parser.add_argument(
-        "-r", "--rate", type=int, required=True,
+        "-r",
+        "--rate",
+        type=int,
+        required=True,
         help="Target QPS (requests per second)",
     )
     parser.add_argument(
-        "-d", "--duration", type=str, default="60s",
+        "-d",
+        "--duration",
+        type=str,
+        default="60s",
         help="Test duration (e.g., 60s, 120s). Default: 60s",
     )
     parser.add_argument(
-        "-c", "--concurrency", type=int, default=16,
+        "-c",
+        "--concurrency",
+        type=int,
+        default=16,
         help="Number of concurrent workers. Default: 16",
     )
     parser.add_argument(
-        "--variants", nargs="+", default=None,
+        "--variants",
+        nargs="+",
+        default=None,
         choices=list(VARIANT_MAP.keys()),
         help="Variants to run. Default: all",
     )
     parser.add_argument(
-        "--output-dir", type=str, default=None,
+        "--output-dir",
+        type=str,
+        default=None,
         help="Directory for JSON reports. Default: /tmp/load-test-results-<timestamp>",
     )
     parser.add_argument(
-        "--skip-compile", action="store_true",
+        "--skip-compile",
+        action="store_true",
         help="Skip cargo compilation (use previously built binaries)",
     )
     parser.add_argument(
-        "--skip-docker", action="store_true",
+        "--skip-docker",
+        action="store_true",
         help="Skip docker compose (Postgres already running)",
     )
     parser.add_argument(
-        "--keep-docker", action="store_true",
+        "--keep-docker",
+        action="store_true",
         help="Don't tear down docker compose after tests",
     )
     parser.add_argument(
-        "--max-error-rate", type=float, default=0.01,
+        "--max-error-rate",
+        type=float,
+        default=0.01,
         help="Max allowed error rate. Default: 0.01",
     )
     parser.add_argument(
-        "--max-p99-latency-ms", type=int, default=None,
+        "--max-p99-latency-ms",
+        type=int,
+        default=None,
         help="Optional p99 latency threshold in ms",
     )
     parser.add_argument(
-        "--verify-timeout-s", type=int, default=30,
+        "--verify-timeout-s",
+        type=int,
+        default=30,
         help="Max time to wait for DB parity checks. Default: 30",
     )
     parser.add_argument(
-        "--prompt-chars", type=int, default=None,
+        "--prompt-chars",
+        type=int,
+        default=None,
         help="Payload size in characters. Default: use load test default (256)",
     )
     parser.add_argument(
-        "--port", type=int, default=3099,
+        "--port",
+        type=int,
+        default=3099,
         help="Gateway port (avoids conflicts with dev gateway). Default: 3099",
     )
     args = parser.parse_args()
 
     # Resolve variants
-    variants_to_run = (
-        [VARIANT_MAP[v] for v in args.variants] if args.variants else VARIANTS
-    )
+    variants_to_run = [VARIANT_MAP[v] for v in args.variants] if args.variants else VARIANTS
 
     # Output directory
     if args.output_dir:
@@ -459,9 +506,7 @@ def main() -> None:
         results: dict[str, dict] = {}
         for variant in variants_to_run:
             log(f"--- Variant: {variant.name} ---")
-            report = run_variant(
-                variant, gateway_bin, load_test_bin, args, output_dir, args.port
-            )
+            report = run_variant(variant, gateway_bin, load_test_bin, args, output_dir, args.port)
             if report:
                 results[variant.name] = report
                 log(

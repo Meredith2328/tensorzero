@@ -8,7 +8,8 @@ use axum::Router;
 use axum::extract::{DefaultBodyLimit, FromRequest, Json, Request, rejection::JsonRejection};
 use moka::sync::Cache;
 use serde::de::DeserializeOwned;
-use sqlx::postgres::PgPoolOptions;
+use sqlx::ConnectOptions;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use tensorzero_auth::postgres::AuthResult;
 use tokio::runtime::Handle;
 use tokio::sync::oneshot::Sender;
@@ -18,8 +19,8 @@ use tracing::instrument;
 
 use crate::cache::CacheManager;
 use crate::config::{
-    BatchWritesConfig, Config, ConfigFileGlob, RuntimeOverlay, snapshot::ConfigSnapshot,
-    snapshot::SnapshotHash, unwritten::UnwrittenConfig,
+    BatchWritesConfig, Config, ConfigFileGlob, ObservabilityConfig, RuntimeOverlay,
+    snapshot::ConfigSnapshot, snapshot::SnapshotHash, unwritten::UnwrittenConfig,
 };
 use crate::db::ConfigQueries;
 use crate::db::clickhouse::ClickHouseConnectionInfo;
@@ -695,11 +696,20 @@ pub async fn setup_clickhouse(
 async fn create_postgres_connection(
     postgres_url: &str,
     connection_pool_size: u32,
-    batch_writes: &BatchWritesConfig,
+    observability: &ObservabilityConfig,
 ) -> Result<PostgresConnectionInfo, Error> {
+    let connect_options: PgConnectOptions = postgres_url.parse().map_err(|err: sqlx::Error| {
+        Error::new(ErrorDetails::PostgresConnectionInitialization {
+            message: err.to_string(),
+        })
+    })?;
+    // Disable sqlx's built-in statement logging (we log slow queries ourselves
+    // with summaries instead of dumping full SQL with thousands of bind params)
+    let connect_options = connect_options.disable_statement_logging();
+
     let pool = PgPoolOptions::new()
         .max_connections(connection_pool_size)
-        .connect(postgres_url)
+        .connect_with(connect_options)
         .await
         .map_err(|err| {
             Error::new(ErrorDetails::PostgresConnectionInitialization {
@@ -707,11 +717,30 @@ async fn create_postgres_connection(
             })
         })?;
 
-    let connection_info = if batch_writes.enabled {
+    let batch_writes = &observability.batch_writes;
+    // When async_writes is enabled, automatically use the batch writer for efficiency
+    // even if batch_writes.enabled is not explicitly set.
+    let connection_info = if batch_writes.enabled || observability.async_writes {
+        let config = if batch_writes.enabled {
+            batch_writes.clone()
+        } else {
+            // Use defaults for batch writes when only async_writes is set
+            BatchWritesConfig {
+                enabled: true,
+                ..Default::default()
+            }
+        };
+        let channel_capacity = observability.write_queue_capacity;
         let batch_sender = Arc::new(PostgresBatchSender::new(
             pool.clone(),
-            batch_writes.clone(),
+            config,
+            channel_capacity,
         )?);
+        tracing::info!(
+            channel_capacity,
+            flush_concurrency = config.flush_concurrency,
+            "Postgres batch writer enabled (bounded channels, concurrent flush)"
+        );
         PostgresConnectionInfo::new_with_pool_and_batcher(pool, batch_sender)
     } else {
         PostgresConnectionInfo::new_with_pool(pool)
@@ -753,7 +782,7 @@ pub async fn setup_postgres(
             create_postgres_connection(
                 postgres_url,
                 config.postgres.connection_pool_size,
-                &config.gateway.observability.batch_writes,
+                &config.gateway.observability,
             )
             .await?
         }
@@ -767,7 +796,7 @@ pub async fn setup_postgres(
             create_postgres_connection(
                 postgres_url,
                 config.postgres.connection_pool_size,
-                &config.gateway.observability.batch_writes,
+                &config.gateway.observability,
             )
             .await?
         }

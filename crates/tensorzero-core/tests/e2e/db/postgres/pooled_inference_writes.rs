@@ -139,6 +139,7 @@ async fn test_chat_inferences_flush_on_max_rows() {
                 max_rows,
                 ..Default::default()
             },
+            1000,
         )
         .expect("should create batch sender"),
     );
@@ -193,6 +194,7 @@ async fn test_json_inferences_flush_on_max_rows() {
                 max_rows,
                 ..Default::default()
             },
+            1000,
         )
         .expect("should create batch sender"),
     );
@@ -245,6 +247,7 @@ async fn test_model_inferences_flush_on_max_rows() {
                 max_rows,
                 ..Default::default()
             },
+            1000,
         )
         .expect("should create batch sender"),
     );
@@ -296,6 +299,7 @@ async fn test_flush_on_timeout() {
                 max_rows: 1000, // Very large — should not trigger via row count
                 ..Default::default()
             },
+            1000,
         )
         .expect("should create batch sender"),
     );
@@ -338,6 +342,7 @@ async fn test_drain_on_close() {
                 max_rows: 1000,            // Very large
                 ..Default::default()
             },
+            1000,
         )
         .expect("should create batch sender"),
     );
@@ -425,6 +430,7 @@ async fn test_overflow_beyond_max_rows() {
                 max_rows,
                 ..Default::default()
             },
+            1000,
         )
         .expect("should create batch sender"),
     );

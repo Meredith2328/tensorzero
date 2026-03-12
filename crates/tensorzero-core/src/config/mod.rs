@@ -425,6 +425,10 @@ pub struct ObservabilityConfig {
     pub backend: ObservabilityBackend,
     #[serde(default)]
     pub async_writes: bool,
+    /// Capacity of the bounded batch writer channels.
+    /// When the channel is full, new rows are dropped and logged.
+    #[serde(default = "default_write_queue_capacity")]
+    pub write_queue_capacity: usize,
     #[serde(default)]
     pub batch_writes: BatchWritesConfig,
     #[deprecated(
@@ -451,6 +455,14 @@ impl ObservabilityConfig {
     }
 }
 
+pub(crate) fn default_write_queue_capacity() -> usize {
+    10000
+}
+
+pub(crate) fn default_flush_concurrency() -> usize {
+    4
+}
+
 fn default_flush_interval_ms() -> u64 {
     100
 }
@@ -475,6 +487,10 @@ pub struct BatchWritesConfig {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_rows_postgres: Option<usize>,
+    /// Number of concurrent flush workers for Postgres batch writes.
+    /// Each worker executes bulk INSERTs in parallel.
+    #[serde(default = "default_flush_concurrency")]
+    pub flush_concurrency: usize,
 }
 
 impl Default for BatchWritesConfig {
@@ -485,6 +501,7 @@ impl Default for BatchWritesConfig {
             flush_interval_ms: default_flush_interval_ms(),
             max_rows: default_max_rows(),
             max_rows_postgres: None,
+            flush_concurrency: default_flush_concurrency(),
         }
     }
 }

@@ -168,8 +168,9 @@ async fn test_chat_inferences_flush_on_max_rows() {
         .await
         .expect("insert should succeed");
 
-    // Give the writer time to flush
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Give the writer time to flush (the two-stage pipeline submits to the flush pool
+    // asynchronously, so we need a bit more time than a single-stage flush)
+    tokio::time::sleep(Duration::from_millis(1500)).await;
 
     let count = count_by_function_name(&pool, "chat_inferences", &function_name).await;
     assert_eq!(
@@ -222,7 +223,7 @@ async fn test_json_inferences_flush_on_max_rows() {
         .await
         .expect("insert should succeed");
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
 
     let count = count_by_function_name(&pool, "json_inferences", &function_name).await;
     assert_eq!(
@@ -275,7 +276,7 @@ async fn test_model_inferences_flush_on_max_rows() {
         .await
         .expect("insert should succeed");
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
 
     let count = count_model_inferences_by_inference_id(&pool, inference_id).await;
     assert_eq!(
@@ -446,8 +447,8 @@ async fn test_overflow_beyond_max_rows() {
         .await
         .expect("insert should succeed");
 
-    // Wait for the first batch to flush
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Wait for the first batch to flush (two-stage pipeline: accumulator → flush pool)
+    tokio::time::sleep(Duration::from_millis(1500)).await;
 
     let count = count_by_function_name(&pool, "chat_inferences", &function_name).await;
     assert_eq!(

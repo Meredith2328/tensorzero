@@ -703,9 +703,11 @@ async fn create_postgres_connection(
             message: err.to_string(),
         })
     })?;
-    // Disable sqlx's built-in statement logging (we log slow queries ourselves
-    // with summaries instead of dumping full SQL with thousands of bind params)
-    let connect_options = connect_options.disable_statement_logging();
+    // Demote sqlx's built-in statement logging from INFO to TRACE.
+    // This avoids flooding logs with full SQL (including thousands of bind params)
+    // during normal operation, while still allowing tests to capture statements
+    // via `capture_logs_with_filter("sqlx=trace")`.
+    let connect_options = connect_options.log_statements(tracing::log::LevelFilter::Trace);
 
     let pool = PgPoolOptions::new()
         .max_connections(connection_pool_size)

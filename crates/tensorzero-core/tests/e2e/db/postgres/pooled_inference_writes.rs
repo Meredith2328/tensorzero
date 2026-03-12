@@ -123,6 +123,49 @@ async fn count_model_inferences_by_inference_id(pool: &sqlx::PgPool, inference_i
     .expect("count query should succeed")
 }
 
+/// Polls `count_by_function_name` until the count equals `expected` or the default timeout elapses.
+async fn poll_until_count(
+    pool: &sqlx::PgPool,
+    table: &'static str,
+    function_name: &str,
+    expected: i64,
+    msg: &str,
+) {
+    let pool = pool.clone();
+    let fn_name = function_name.to_string();
+    poll_for_result(
+        move || {
+            let pool = pool.clone();
+            let fn_name = fn_name.clone();
+            async move { Ok::<_, ()>(count_by_function_name(&pool, table, &fn_name).await) }
+        },
+        move |count| *count == expected,
+        msg,
+    )
+    .await;
+}
+
+/// Polls `count_model_inferences_by_inference_id` until the count equals `expected`.
+async fn poll_until_model_count(
+    pool: &sqlx::PgPool,
+    inference_id: Uuid,
+    expected: i64,
+    msg: &str,
+) {
+    let pool = pool.clone();
+    poll_for_result(
+        move || {
+            let pool = pool.clone();
+            async move {
+                Ok::<_, ()>(count_model_inferences_by_inference_id(&pool, inference_id).await)
+            }
+        },
+        move |count| *count == expected,
+        msg,
+    )
+    .await;
+}
+
 /// Rows buffered below `max_rows` should not be written until the flush interval elapses.
 /// Sending exactly `max_rows` should trigger a flush.
 #[tokio::test(flavor = "multi_thread")]
@@ -170,15 +213,11 @@ async fn test_chat_inferences_flush_on_max_rows() {
         .expect("insert should succeed");
 
     // Poll until the two-stage pipeline flushes to Postgres
-    let poll_pool = pool.clone();
-    let poll_fn = function_name.clone();
-    poll_for_result(
-        move || {
-            let pool = poll_pool.clone();
-            let fn_name = poll_fn.clone();
-            async move { Ok::<_, ()>(count_by_function_name(&pool, "chat_inferences", &fn_name).await) }
-        },
-        |count| *count == max_rows as i64,
+    poll_until_count(
+        &pool,
+        "chat_inferences",
+        &function_name,
+        max_rows as i64,
         "All rows should be flushed once max_rows is reached",
     )
     .await;
@@ -228,15 +267,11 @@ async fn test_json_inferences_flush_on_max_rows() {
         .await
         .expect("insert should succeed");
 
-    let poll_pool = pool.clone();
-    let poll_fn = function_name.clone();
-    poll_for_result(
-        move || {
-            let pool = poll_pool.clone();
-            let fn_name = poll_fn.clone();
-            async move { Ok::<_, ()>(count_by_function_name(&pool, "json_inferences", &fn_name).await) }
-        },
-        |count| *count == max_rows as i64,
+    poll_until_count(
+        &pool,
+        "json_inferences",
+        &function_name,
+        max_rows as i64,
         "All rows should be flushed once max_rows is reached",
     )
     .await;
@@ -286,15 +321,10 @@ async fn test_model_inferences_flush_on_max_rows() {
         .await
         .expect("insert should succeed");
 
-    let poll_pool = pool.clone();
-    poll_for_result(
-        move || {
-            let pool = poll_pool.clone();
-            async move {
-                Ok::<_, ()>(count_model_inferences_by_inference_id(&pool, inference_id).await)
-            }
-        },
-        |count| *count == max_rows as i64,
+    poll_until_model_count(
+        &pool,
+        inference_id,
+        max_rows as i64,
         "All rows should be flushed once max_rows is reached",
     )
     .await;
@@ -333,15 +363,11 @@ async fn test_flush_on_timeout() {
     assert_eq!(count, 0, "Rows should not be flushed immediately");
 
     // Poll until the flush interval triggers
-    let poll_pool = pool.clone();
-    let poll_fn = function_name.clone();
-    poll_for_result(
-        move || {
-            let pool = poll_pool.clone();
-            let fn_name = poll_fn.clone();
-            async move { Ok::<_, ()>(count_by_function_name(&pool, "chat_inferences", &fn_name).await) }
-        },
-        |count| *count == 3,
+    poll_until_count(
+        &pool,
+        "chat_inferences",
+        &function_name,
+        3,
         "Rows should be flushed after the flush interval elapses",
     )
     .await;
@@ -468,16 +494,11 @@ async fn test_overflow_beyond_max_rows() {
         .expect("insert should succeed");
 
     // Poll until the first batch flushes (two-stage pipeline: accumulator → flush pool)
-    let poll_pool = pool.clone();
-    let poll_fn = function_name.clone();
-    let expected = max_rows as i64;
-    poll_for_result(
-        move || {
-            let pool = poll_pool.clone();
-            let fn_name = poll_fn.clone();
-            async move { Ok::<_, ()>(count_by_function_name(&pool, "chat_inferences", &fn_name).await) }
-        },
-        move |count| *count == expected,
+    poll_until_count(
+        &pool,
+        "chat_inferences",
+        &function_name,
+        max_rows as i64,
         "First batch of max_rows should be flushed; remainder stays buffered",
     )
     .await;

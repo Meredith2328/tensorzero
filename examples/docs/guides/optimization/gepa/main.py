@@ -77,6 +77,7 @@ async def main():
         mutation_model=MUTATION_MODEL,
         initial_variants=INITIAL_VARIANTS,
         max_iterations=MAX_ITERATIONS,
+        max_concurrency=MAX_CONCURRENCY,
     )
 
     task_id = result.task_id

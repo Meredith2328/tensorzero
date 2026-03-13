@@ -485,6 +485,15 @@ Launch a GEPA optimization task. Returns a task ID for polling.
   Random seed for reproducibility.
 </ParamField>
 
+<ParamField body="max_concurrency" type="integer">
+  Maximum number of concurrent inference calls. Default: 10.
+</ParamField>
+
+<ParamField body="max_datapoints" type="integer">
+  Maximum number of datapoints to use from the dataset. If not specified, uses
+  all datapoints.
+</ParamField>
+
 <ParamField body="include_inference_for_mutation" type="boolean">
   Whether to include inference input/output in the analysis passed to the
   mutation model. Useful for few-shot examples but can cause context overflow

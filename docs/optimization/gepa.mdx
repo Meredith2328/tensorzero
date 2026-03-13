@@ -263,7 +263,7 @@ while True:
         break
     elif response["status"] == "error":
         print(f"GEPA optimization failed: {response['error']}")
-        break
+        return
     else:
         progress = response.get("progress")
         if progress:

@@ -46,7 +46,7 @@ services:
     command: --config-file /app/config/tensorzero.toml
     environment:
       TENSORZERO_CLICKHOUSE_URL: http://chuser:chpassword@clickhouse:8123/tensorzero
-      TENSORZERO_POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/tensorzero
+      TENSORZERO_POSTGRES_URL: postgres://postgres:postgres@postgres:5432/tensorzero
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Environment variable OPENAI_API_KEY must be set.}
     ports:
       - "3000:3000"
@@ -60,8 +60,18 @@ services:
     depends_on:
       clickhouse:
         condition: service_healthy
+      gateway-run-postgres-migrations:
+        condition: service_completed_successfully
+
+  # Apply Postgres migrations before the gateway starts
+  gateway-run-postgres-migrations:
+    image: tensorzero/gateway
+    environment:
+      TENSORZERO_POSTGRES_URL: postgres://postgres:postgres@postgres:5432/tensorzero
+    depends_on:
       postgres:
         condition: service_healthy
+    command: ["--run-postgres-migrations"]
 
   ui:
     image: tensorzero/ui
